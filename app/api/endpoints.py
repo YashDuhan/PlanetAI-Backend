@@ -4,7 +4,7 @@ from pydantic import BaseModel
 from dotenv import load_dotenv
 from asyncpg import Connection
 from .pdf_handler import extract_text_from_pdf, upload_pdf_to_s3
-from .db import get_db_connection, init_db_pool, close_db_pool  # Import init and close functions for pool
+from .db import get_db_connection, init_db_pool, close_db_pool
 from groq import Groq
 
 # Load environment variables and initialize Groq client
@@ -14,7 +14,7 @@ client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 # Define FastAPI app instance
 app = FastAPI()
 
-# App startup and shutdown events for managing db pool
+# App startup and shutdown events
 @app.on_event("startup")
 async def startup_event():
     await init_db_pool()
@@ -23,7 +23,7 @@ async def startup_event():
 async def shutdown_event():
     await close_db_pool()
 
-# Define Pydantic model for question requests
+# Pydantic model for question requests
 class AskQuestionRequest(BaseModel):
     extracted_text: str
     question: str
@@ -42,7 +42,7 @@ async def upload_pdf(file: UploadFile = File(...), conn: Connection = Depends(ge
     file_data = await file.read()
     if len(file_data) > MAX_FILE_SIZE:
         raise HTTPException(status_code=400, detail="File size exceeds the 4 MB limit")
-    await file.seek(0)  # Reset file pointer
+    await file.seek(0)
 
     # Extract text from PDF
     text = extract_text_from_pdf(file_data)
@@ -50,7 +50,7 @@ async def upload_pdf(file: UploadFile = File(...), conn: Connection = Depends(ge
     # Upload the PDF file to S3 and get the S3 URL
     s3_url = upload_pdf_to_s3(file_data, file.filename)
 
-    # Save metadata to the PostgreSQL database
+    # Save metadata to PostgreSQL database
     await conn.execute(
         """
         INSERT INTO main_pdf_metadata (filename, filesize, filecontent, uploaddate, s3_url)
@@ -77,7 +77,7 @@ async def ask_question(request: AskQuestionRequest):
             temperature=1,
             max_tokens=1024,
             top_p=1,
-            stream=False # Get a full response at once
+            stream=False
         )
 
         # Extract and return the answer

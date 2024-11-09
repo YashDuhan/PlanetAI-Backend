@@ -2,6 +2,7 @@ import asyncpg
 import os
 from dotenv import load_dotenv
 from fastapi import HTTPException
+import asyncio
 import logging
 
 # Set up logging for debugging
@@ -20,7 +21,6 @@ async def init_db_pool():
     global db_pool
     if db_pool is None:
         try:
-            # Create a connection pool with the specified database URL
             db_pool = await asyncpg.create_pool(
                 DATABASE_URL, 
                 ssl="require",
@@ -35,7 +35,8 @@ async def init_db_pool():
 async def close_db_pool():
     global db_pool
     if db_pool is not None:
-        await db_pool.close()
+        # Shield shutdown to handle serverless environment’s lifecycle
+        await asyncio.shield(db_pool.close())
         logging.debug("Database pool closed")
 
 # Dependency for getting a database connection from the pool
@@ -44,7 +45,10 @@ async def get_db_connection():
         await init_db_pool()
     conn = await db_pool.acquire()
     try:
+        if conn.is_closed():
+            raise HTTPException(status_code=500, detail="Database connection is closed.")
         yield conn
     finally:
-        await db_pool.release(conn)  # Release, not close, to reuse connection
-        logging.debug("Database connection released back to pool")
+        if not conn.is_closed():  # Ensure the connection is still open
+            await db_pool.release(conn)  # Release connection back to pool
+            logging.debug("Database connection released back to pool")
