@@ -11,16 +11,17 @@ from groq import Groq
 load_dotenv()
 client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 
-# Define FastAPI app instance
+# Create FastAPI app
 app = FastAPI()
 
-# App startup and shutdown events for managing db pool
 @app.on_event("startup")
-async def startup_event():
+async def on_startup():
+    # Initialize DB pool
     await init_db_pool()
 
 @app.on_event("shutdown")
-async def shutdown_event():
+async def on_shutdown():
+    # Close DB pool when the app shuts down
     await close_db_pool()
 
 # Define Pydantic model for question requests
