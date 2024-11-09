@@ -2,12 +2,11 @@ import os
 from fastapi import FastAPI, File, UploadFile, HTTPException, Depends
 from pydantic import BaseModel
 from dotenv import load_dotenv
-from sqlalchemy.ext.asyncio import AsyncSession
-from sqlalchemy.future import select
+from asyncpg import Connection
 from .pdf_handler import extract_text_from_pdf, upload_pdf_to_s3
-from .db import get_db_connection, init_db_pool, close_db_pool
-from contextlib import asynccontextmanager
+from .db import get_db_connection, init_db_pool, close_db_pool  # Import init and close functions for pool
 from groq import Groq
+from contextlib import asynccontextmanager
 
 # Load environment variables and initialize Groq client
 load_dotenv()
@@ -19,14 +18,16 @@ app = FastAPI()
 # Lifespan event handler to manage setup and teardown
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await init_db_pool()  # Initialize database pool
+    # Initialize the database connection pool on startup
+    await init_db_pool()
     yield
-    await close_db_pool()  # Clean up database pool after app shutdown
+    # Clean up the database connection pool on shutdown
+    await close_db_pool()
 
-# Attach lifespan event handler to the app
+# Attach the lifespan event handler to the FastAPI app
 app.router.lifespan_context = lifespan
 
-# Pydantic model for question requests
+# Define Pydantic model for question requests
 class AskQuestionRequest(BaseModel):
     extracted_text: str
     question: str
@@ -34,7 +35,7 @@ class AskQuestionRequest(BaseModel):
 
 # Endpoint to handle PDF upload, validate size, extract text, save metadata, upload to S3
 @app.post("/upload")
-async def upload_pdf(file: UploadFile = File(...), conn: AsyncSession = Depends(get_db_connection)):
+async def upload_pdf(file: UploadFile = File(...), conn: Connection = Depends(get_db_connection)):
     MAX_FILE_SIZE = 4 * 1024 * 1024  # 4 MB limit
 
     # Validate file type
@@ -45,23 +46,22 @@ async def upload_pdf(file: UploadFile = File(...), conn: AsyncSession = Depends(
     file_data = await file.read()
     if len(file_data) > MAX_FILE_SIZE:
         raise HTTPException(status_code=400, detail="File size exceeds the 4 MB limit")
-    await file.seek(0)
+    await file.seek(0)  # Reset file pointer
 
     # Extract text from PDF
     text = extract_text_from_pdf(file_data)
 
     # Upload the PDF file to S3 and get the S3 URL
-    s3_url = upload_pdf_to_s3(file_data, file.filename)
+    s3_url = await upload_pdf_to_s3(file_data, file.filename)
 
-    # Save metadata to PostgreSQL database using SQLAlchemy
-    async with conn.begin():
-        conn.execute(
-            """
-            INSERT INTO main_pdf_metadata (filename, filesize, filecontent, uploaddate, s3_url)
-            VALUES (:filename, :filesize, :filecontent, CURRENT_TIMESTAMP, :s3_url)
-            """,
-            {"filename": file.filename, "filesize": len(file_data), "filecontent": text, "s3_url": s3_url}
-        )
+    # Save metadata to the PostgreSQL database
+    await conn.execute(
+        """
+        INSERT INTO main_pdf_metadata (filename, filesize, filecontent, uploaddate, s3_url)
+        VALUES ($1, $2, $3, CURRENT_TIMESTAMP, $4)
+        """,
+        file.filename, len(file_data), text, s3_url
+    )
 
     # Return response with filename, extracted text, and S3 URL
     return {"filename": file.filename, "extracted_text": text, "s3_url": s3_url}
@@ -81,7 +81,7 @@ async def ask_question(request: AskQuestionRequest):
             temperature=1,
             max_tokens=1024,
             top_p=1,
-            stream=False
+            stream=False  # Get a full response at once
         )
 
         # Extract and return the answer
