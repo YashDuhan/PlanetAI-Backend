@@ -23,28 +23,28 @@ async def init_db_pool():
             # Create a connection pool with the specified database URL
             db_pool = await asyncpg.create_pool(
                 DATABASE_URL, 
-                ssl='require', 
-                timeout=30, 
-                min_size=5,  # Minimum number of connections
-                max_size=20  # Maximum number of connections
+                ssl="require",
+                min_size=5,
+                max_size=20
             )
             logging.debug("Database pool initialized")
         except Exception as e:
             logging.error(f"Error initializing database pool: {e}")
             raise HTTPException(status_code=500, detail="Failed to initialize database connection pool.")
 
+async def close_db_pool():
+    global db_pool
+    if db_pool is not None:
+        await db_pool.close()
+        logging.debug("Database pool closed")
+
 # Dependency for getting a database connection from the pool
 async def get_db_connection():
     if db_pool is None:
-        await init_db_pool()  # Ensure the pool is initialized
+        await init_db_pool()
+    conn = await db_pool.acquire()
     try:
-        # Acquire a connection from the pool
-        conn = await db_pool.acquire()
-        yield conn  # Return the connection for database operations
-        # Explicitly close the connection after the operation is done
-        await conn.close()
-        logging.debug("Database connection manually closed after operation")
-    except Exception as e:
-        logging.error(f"Error acquiring or closing database connection: {e}")
-        raise HTTPException(status_code=500, detail="Failed to acquire database connection.")
-
+        yield conn
+    finally:
+        await db_pool.release(conn)  # Release, not close, to reuse connection
+        logging.debug("Database connection released back to pool")
