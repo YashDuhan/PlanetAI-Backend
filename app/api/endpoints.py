@@ -2,7 +2,8 @@ import os
 from fastapi import FastAPI, File, UploadFile, HTTPException, Depends
 from pydantic import BaseModel
 from dotenv import load_dotenv
-from asyncpg import Connection
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.future import select
 from .pdf_handler import extract_text_from_pdf, upload_pdf_to_s3
 from .db import get_db_connection, init_db_pool, close_db_pool
 from contextlib import asynccontextmanager
@@ -18,9 +19,9 @@ app = FastAPI()
 # Lifespan event handler to manage setup and teardown
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    await init_db_pool()
+    await init_db_pool()  # Initialize database pool
     yield
-    await close_db_pool()
+    await close_db_pool()  # Clean up database pool after app shutdown
 
 # Attach lifespan event handler to the app
 app.router.lifespan_context = lifespan
@@ -33,7 +34,7 @@ class AskQuestionRequest(BaseModel):
 
 # Endpoint to handle PDF upload, validate size, extract text, save metadata, upload to S3
 @app.post("/upload")
-async def upload_pdf(file: UploadFile = File(...), conn: Connection = Depends(get_db_connection)):
+async def upload_pdf(file: UploadFile = File(...), conn: AsyncSession = Depends(get_db_connection)):
     MAX_FILE_SIZE = 4 * 1024 * 1024  # 4 MB limit
 
     # Validate file type
@@ -52,14 +53,15 @@ async def upload_pdf(file: UploadFile = File(...), conn: Connection = Depends(ge
     # Upload the PDF file to S3 and get the S3 URL
     s3_url = upload_pdf_to_s3(file_data, file.filename)
 
-    # Save metadata to PostgreSQL database
-    await conn.execute(
-        """
-        INSERT INTO main_pdf_metadata (filename, filesize, filecontent, uploaddate, s3_url)
-        VALUES ($1, $2, $3, CURRENT_TIMESTAMP, $4)
-        """,
-        file.filename, len(file_data), text, s3_url
-    )
+    # Save metadata to PostgreSQL database using SQLAlchemy
+    async with conn.begin():
+        conn.execute(
+            """
+            INSERT INTO main_pdf_metadata (filename, filesize, filecontent, uploaddate, s3_url)
+            VALUES (:filename, :filesize, :filecontent, CURRENT_TIMESTAMP, :s3_url)
+            """,
+            {"filename": file.filename, "filesize": len(file_data), "filecontent": text, "s3_url": s3_url}
+        )
 
     # Return response with filename, extracted text, and S3 URL
     return {"filename": file.filename, "extracted_text": text, "s3_url": s3_url}
