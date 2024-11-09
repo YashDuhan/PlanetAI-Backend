@@ -18,11 +18,12 @@ if not DATABASE_URL:
 db_pool = None
 
 async def init_db_pool():
+    """Initialize the database connection pool."""
     global db_pool
     if db_pool is None:
         try:
             db_pool = await asyncpg.create_pool(
-                DATABASE_URL, 
+                DATABASE_URL,
                 ssl="require",
                 min_size=5,
                 max_size=20
@@ -33,14 +34,17 @@ async def init_db_pool():
             raise HTTPException(status_code=500, detail="Failed to initialize database connection pool.")
 
 async def close_db_pool():
+    """Close the database connection pool."""
     global db_pool
     if db_pool is not None:
         # Shield shutdown to handle serverless environment’s lifecycle
         await asyncio.shield(db_pool.close())
+        db_pool = None
         logging.debug("Database pool closed")
 
 # Dependency for getting a database connection from the pool
 async def get_db_connection():
+    """Provide a database connection from the pool."""
     if db_pool is None:
         await init_db_pool()
     conn = await db_pool.acquire()

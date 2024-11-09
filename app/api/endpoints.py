@@ -5,6 +5,7 @@ from dotenv import load_dotenv
 from asyncpg import Connection
 from .pdf_handler import extract_text_from_pdf, upload_pdf_to_s3
 from .db import get_db_connection, init_db_pool, close_db_pool
+from contextlib import asynccontextmanager
 from groq import Groq
 
 # Load environment variables and initialize Groq client
@@ -14,14 +15,15 @@ client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 # Define FastAPI app instance
 app = FastAPI()
 
-# App startup and shutdown events
-@app.on_event("startup")
-async def startup_event():
+# Lifespan event handler to manage setup and teardown
+@asynccontextmanager
+async def lifespan(app: FastAPI):
     await init_db_pool()
-
-@app.on_event("shutdown")
-async def shutdown_event():
+    yield
     await close_db_pool()
+
+# Attach lifespan event handler to the app
+app.router.lifespan_context = lifespan
 
 # Pydantic model for question requests
 class AskQuestionRequest(BaseModel):
