@@ -44,4 +44,12 @@ async def get_db_connection():
     except Exception as e:
         logging.error(f"Error acquiring database connection: {e}")
         raise HTTPException(status_code=500, detail="Failed to acquire database connection.")
+    
 
+# Function to release connection manually if needed
+async def release_db_connection(conn):
+    try:
+        await conn.close()  # Explicitly close the connection if needed
+        logging.debug("Database connection manually closed")
+    except Exception as e:
+        logging.error(f"Error closing database connection: {e}")
