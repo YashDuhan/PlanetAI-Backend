@@ -2,7 +2,7 @@ import os
 from dotenv import load_dotenv
 import boto3
 from botocore.exceptions import NoCredentialsError
-import fitz
+import fitz #PyMuPDF
 
 # Load env
 load_dotenv()
