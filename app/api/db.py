@@ -1,29 +1,36 @@
-import asyncpg
-from fastapi import HTTPException
 import os
+from asyncpg import create_pool, Connection
 from dotenv import load_dotenv
-import logging
+from urllib.parse import urlparse
 
 # Load environment variables
 load_dotenv()
-DATABASE_URL = os.getenv("DATABASE_URL")
 
-# Initialize logging
-logging.basicConfig(level=logging.DEBUG)
+# Global DB pool variable
+db_pool = None
 
-# Manually create a connection only for the upload endpoint
-async def get_db_connection():
-    try:
-        # Manually create a new connection for each request
-        conn = await asyncpg.connect(DATABASE_URL, ssl="require")
-        return conn
-    except Exception as e:
-        logging.error(f"Error getting database connection: {e}")
-        raise HTTPException(status_code=500, detail="Failed to get database connection")
+async def init_db_pool():
+    global db_pool
+    # Parse the DATABASE_URL
+    database_url = os.getenv("DATABASE_URL")
+    result = urlparse(database_url)
 
-async def close_db_connection(conn):
-    try:
-        await conn.close()
-    except Exception as e:
-        logging.error(f"Error closing database connection: {e}")
-        raise HTTPException(status_code=500, detail="Failed to close database connection")
+    # Extract database details from the URL
+    db_pool = await create_pool(
+        user=result.username,
+        password=result.password,
+        database=result.path[1:],  # Remove the leading slash from the path
+        host=result.hostname,
+        port=result.port,
+        ssl="require" in result.query  # Check for SSL mode in the query parameters
+    )
+
+async def close_db_pool():
+    global db_pool
+    if db_pool:
+        await db_pool.close()
+
+def get_db_connection() -> Connection:
+    if db_pool:
+        return db_pool.acquire()
+    raise Exception("DB pool is not initialized")

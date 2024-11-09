@@ -6,7 +6,6 @@ from asyncpg import Connection
 from .pdf_handler import extract_text_from_pdf, upload_pdf_to_s3
 from .db import get_db_connection, init_db_pool, close_db_pool  # Import init and close functions for pool
 from groq import Groq
-from contextlib import asynccontextmanager
 
 # Load environment variables and initialize Groq client
 load_dotenv()
@@ -15,17 +14,14 @@ client = Groq(api_key=os.getenv("GROQ_API_KEY"))
 # Define FastAPI app instance
 app = FastAPI()
 
-# Lifespan event handler to manage setup and teardown
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Initialize the database connection pool on startup
+# App startup and shutdown events for managing db pool
+@app.on_event("startup")
+async def startup_event():
     await init_db_pool()
-    yield
-    # Clean up the database connection pool on shutdown
-    await close_db_pool()
 
-# Attach the lifespan event handler to the FastAPI app
-app.router.lifespan_context = lifespan
+@app.on_event("shutdown")
+async def shutdown_event():
+    await close_db_pool()
 
 # Define Pydantic model for question requests
 class AskQuestionRequest(BaseModel):
@@ -52,7 +48,7 @@ async def upload_pdf(file: UploadFile = File(...), conn: Connection = Depends(ge
     text = extract_text_from_pdf(file_data)
 
     # Upload the PDF file to S3 and get the S3 URL
-    s3_url = await upload_pdf_to_s3(file_data, file.filename)
+    s3_url = upload_pdf_to_s3(file_data, file.filename)
 
     # Save metadata to the PostgreSQL database
     await conn.execute(
@@ -73,11 +69,9 @@ async def ask_question(request: AskQuestionRequest):
         # Generate response from Groq API
         completion = client.chat.completions.create(
             model="llama-3.2-90b-text-preview",
-            messages=[
-                {"role": "user", "content": f"Context: {request.extracted_text}"},
-                {"role": "user", "content": f"Question: {request.question}"},
-                {"role": "user", "content": f"Previous Conversation: {request.previous_convo}"}
-            ],
+            messages=[{"role": "user", "content": f"Context: {request.extracted_text}"},
+                      {"role": "user", "content": f"Question: {request.question}"},
+                      {"role": "user", "content": f"Previous Conversation: {request.previous_convo}"}],
             temperature=1,
             max_tokens=1024,
             top_p=1,
